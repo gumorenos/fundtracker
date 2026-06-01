@@ -1,17 +1,18 @@
 """
-Idempotent seed: creates users, default categories, fund config,
-and projection params if they don't exist yet.
+Idempotent seed: creates users, default categories, funds,
+pen_wallet and projection params if they don't exist yet.
 """
 import os
 import sys
-from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(__file__))
+
+from datetime import datetime, timezone
 
 from app.auth import hash_password
 from app.config import settings
 from app.database import SessionLocal
-from app.models import Category, FundConfig, ProjectionParams, User
+from app.models import Category, Fund, PenWallet, ProjectionParams, User
 
 DEFAULT_CATEGORIES = [
     ("Terapia", "#6366f1"),
@@ -20,6 +21,11 @@ DEFAULT_CATEGORIES = [
     ("Comida", "#22c55e"),
     ("Servicios", "#3b82f6"),
     ("Otros", "#94a3b8"),
+]
+
+DEFAULT_FUNDS = [
+    ("Emergencia", settings.initial_balance_usd / 2),
+    ("Personal", settings.initial_balance_usd / 2),
 ]
 
 
@@ -32,7 +38,13 @@ def seed():
             (settings.viewer_username, settings.viewer_password, "viewer"),
         ]:
             if not db.query(User).filter(User.username == username).first():
-                db.add(User(username=username, password_hash=hash_password(password), role=role))
+                db.add(
+                    User(
+                        username=username,
+                        password_hash=hash_password(password),
+                        role=role,
+                    )
+                )
                 print(f"  Created user: {username} ({role})")
 
         # Default categories
@@ -41,18 +53,25 @@ def seed():
                 db.add(Category(name=name, color=color, is_default=True))
                 print(f"  Created category: {name}")
 
-        # Fund config (single row)
-        if not db.query(FundConfig).first():
-            db.add(
-                FundConfig(
-                    initial_balance_usd=settings.initial_balance_usd,
-                    current_balance_usd=settings.initial_balance_usd,
-                    start_date=datetime.now(timezone.utc),
+        # Funds
+        for name, initial in DEFAULT_FUNDS:
+            if not db.query(Fund).filter(Fund.name == name).first():
+                db.add(
+                    Fund(
+                        name=name,
+                        initial_balance_usd=initial,
+                        current_balance_usd=initial,
+                        created_at=datetime.now(timezone.utc),
+                    )
                 )
-            )
-            print(f"  Created fund config with balance: {settings.initial_balance_usd}")
+                print(f"  Created fund: {name} (${initial:.2f})")
 
-        # Projection params (single row)
+        # PEN wallet
+        if not db.query(PenWallet).first():
+            db.add(PenWallet(balance_pen=0))
+            print("  Created PEN wallet")
+
+        # Projection params
         if not db.query(ProjectionParams).first():
             db.add(ProjectionParams(adjustment_percentage=0))
             print("  Created projection params")

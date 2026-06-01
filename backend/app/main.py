@@ -2,9 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import auth, categories, projection, summary, transactions
+from app.routers import auth, categories, funds, projection, summary, transactions
 
-app = FastAPI(title="FundTracker API", version="1.0.0")
+app = FastAPI(title="FundTracker API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -19,6 +19,7 @@ app.include_router(transactions.router)
 app.include_router(categories.router)
 app.include_router(summary.router)
 app.include_router(projection.router)
+app.include_router(funds.router)
 
 
 @app.get("/health")

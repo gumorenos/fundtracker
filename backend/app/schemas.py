@@ -1,8 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
-
+from pydantic import BaseModel, Field, model_validator
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -14,6 +13,21 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+# ── Fund ──────────────────────────────────────────────────────────────────────
+
+class FundOut(BaseModel):
+    id: int
+    name: str
+    initial_balance_usd: Decimal
+    current_balance_usd: Decimal
+
+    model_config = {"from_attributes": True}
+
+
+class FundInitialBalanceUpdate(BaseModel):
+    initial_balance_usd: Decimal = Field(..., gt=0, decimal_places=2)
 
 
 # ── Category ──────────────────────────────────────────────────────────────────
@@ -42,22 +56,58 @@ class CategoryOut(CategoryBase):
 
 # ── Transaction ───────────────────────────────────────────────────────────────
 
+VALID_TYPES = {"expense", "currency_exchange", "usd_expense"}
+
+
 class TransactionCreate(BaseModel):
-    amount_usd: Decimal = Field(..., gt=0, decimal_places=2)
-    amount_pen: Decimal | None = Field(None, gt=0, decimal_places=2)
-    exchange_rate: Decimal | None = Field(None, gt=0, decimal_places=4)
-    category_id: int
+    type: str
+    amount_usd: Decimal | None = Field(None, gt=0)
+    amount_pen: Decimal | None = Field(None, gt=0)
+    exchange_rate: Decimal | None = Field(None, gt=0)
+    fund_id: int | None = None
+    category_id: int | None = None
     description: str | None = None
     transaction_date: datetime | None = None
+
+    @model_validator(mode="after")
+    def check_by_type(self) -> "TransactionCreate":
+        t = self.type
+        if t not in VALID_TYPES:
+            raise ValueError(f"type must be one of {VALID_TYPES}")
+        if t == "expense":
+            if self.amount_pen is None:
+                raise ValueError("amount_pen required for expense")
+            if self.category_id is None:
+                raise ValueError("category_id required for expense")
+        elif t == "currency_exchange":
+            for name, val in [
+                ("amount_usd", self.amount_usd),
+                ("amount_pen", self.amount_pen),
+                ("exchange_rate", self.exchange_rate),
+                ("fund_id", self.fund_id),
+            ]:
+                if val is None:
+                    raise ValueError(f"{name} required for currency_exchange")
+        elif t == "usd_expense":
+            if self.amount_usd is None:
+                raise ValueError("amount_usd required for usd_expense")
+            if self.fund_id is None:
+                raise ValueError("fund_id required for usd_expense")
+            if self.category_id is None:
+                raise ValueError("category_id required for usd_expense")
+        return self
 
 
 class TransactionOut(BaseModel):
     id: int
-    amount_usd: Decimal
+    type: str
+    amount_usd: Decimal | None
     amount_pen: Decimal | None
     exchange_rate: Decimal | None
-    category_id: int
-    category: CategoryOut
+    category_id: int | None
+    category: CategoryOut | None
+    fund_id: int | None
+    fund: FundOut | None
     description: str | None
     transaction_date: datetime
     created_at: datetime
@@ -68,12 +118,12 @@ class TransactionOut(BaseModel):
 # ── Summary ───────────────────────────────────────────────────────────────────
 
 class SummaryOut(BaseModel):
-    saldo_actual_usd: Decimal
-    saldo_actual_pen: Decimal | None
-    gasto_total_usd: Decimal
-    gasto_mes_actual_usd: Decimal
-    gasto_promedio_diario_usd: Decimal
-    dias_desde_inicio: int
+    funds: list[FundOut]
+    total_usd: Decimal
+    pen_wallet_balance: Decimal
+    gasto_mes_actual_pen: Decimal
+    gasto_promedio_diario_pen: Decimal
+    ultimo_tipo_cambio: Decimal | None
     proyeccion_agotamiento: datetime | None
     proyeccion_dias_restantes: int | None
 

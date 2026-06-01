@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import FundConfig, Transaction, User
-from app.schemas import SummaryOut
+from app.models import Fund, PenWallet, ProjectionParams, Transaction, User
+from app.schemas import FundOut, SummaryOut
 
 router = APIRouter(prefix="/summary", tags=["summary"])
 
@@ -18,61 +18,78 @@ def get_summary(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    config = db.query(FundConfig).first()
     now = datetime.now(timezone.utc)
-
-    current_balance = Decimal(str(config.current_balance_usd)) if config else Decimal(0)
-    start_date = config.start_date if config else now
-    dias_desde_inicio = max((now - start_date).days, 0)
-
-    total_spent = db.query(func.coalesce(func.sum(Transaction.amount_usd), 0)).scalar()
-    gasto_total_usd = Decimal(str(total_spent))
-
+    thirty_ago = now - timedelta(days=30)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    month_spent = db.query(
-        func.coalesce(func.sum(Transaction.amount_usd), 0)
-    ).filter(Transaction.transaction_date >= month_start).scalar()
-    gasto_mes_actual_usd = Decimal(str(month_spent))
 
-    thirty_days_ago = now - timedelta(days=30)
-    spent_30 = db.query(
-        func.coalesce(func.sum(Transaction.amount_usd), 0)
-    ).filter(Transaction.transaction_date >= thirty_days_ago).scalar()
-    gasto_promedio_diario_usd = Decimal(str(spent_30)) / Decimal(30)
+    # Funds
+    funds = db.query(Fund).order_by(Fund.id).all()
+    total_usd = sum(float(f.current_balance_usd) for f in funds)
 
-    # Last known exchange rate
-    last_tx_with_rate = (
+    # PEN wallet
+    wallet = db.query(PenWallet).first()
+    pen_wallet_balance = float(wallet.balance_pen) if wallet else 0.0
+
+    # Monthly PEN expenses (expense type only)
+    gasto_mes_pen = db.query(
+        func.coalesce(func.sum(Transaction.amount_pen), 0)
+    ).filter(
+        Transaction.type == "expense",
+        Transaction.transaction_date >= month_start,
+    ).scalar()
+
+    # 30-day daily average PEN expenses
+    gasto_30_pen = db.query(
+        func.coalesce(func.sum(Transaction.amount_pen), 0)
+    ).filter(
+        Transaction.type == "expense",
+        Transaction.transaction_date >= thirty_ago,
+    ).scalar()
+    gasto_promedio_diario_pen = float(gasto_30_pen) / 30
+
+    # Last exchange rate from a currency_exchange
+    last_exchange = (
         db.query(Transaction)
-        .filter(Transaction.exchange_rate.isnot(None))
+        .filter(
+            Transaction.type == "currency_exchange",
+            Transaction.exchange_rate.isnot(None),
+        )
         .order_by(Transaction.transaction_date.desc())
         .first()
     )
-    saldo_actual_pen = None
-    if last_tx_with_rate and last_tx_with_rate.exchange_rate:
-        saldo_actual_pen = current_balance * Decimal(
-            str(last_tx_with_rate.exchange_rate)
-        )
+    ultimo_tipo_cambio = (
+        Decimal(str(last_exchange.exchange_rate)) if last_exchange else None
+    )
+
+    # Projection: based on USD leaving via currency_exchange last 30 days
+    usd_30_exchange = db.query(
+        func.coalesce(func.sum(Transaction.amount_usd), 0)
+    ).filter(
+        Transaction.type == "currency_exchange",
+        Transaction.transaction_date >= thirty_ago,
+    ).scalar()
+    usd_per_day = float(usd_30_exchange) / 30
+
+    params = db.query(ProjectionParams).first()
+    adj_pct = float(params.adjustment_percentage) if params else 0.0
+    usd_adjusted = usd_per_day * (1 + adj_pct / 100)
 
     proyeccion_agotamiento = None
     proyeccion_dias_restantes = None
-    if gasto_promedio_diario_usd > 0 and current_balance > 0:
-        from app.models import ProjectionParams
+    if usd_adjusted > 0 and total_usd > 0:
+        dias = int(total_usd / usd_adjusted)
+        proyeccion_dias_restantes = dias
+        proyeccion_agotamiento = now + timedelta(days=dias)
 
-        params = db.query(ProjectionParams).first()
-        adj_pct = Decimal(str(params.adjustment_percentage)) if params else Decimal(0)
-        gasto_ajustado = gasto_promedio_diario_usd * (1 + adj_pct / 100)
-        if gasto_ajustado > 0:
-            dias_restantes = int(current_balance / gasto_ajustado)
-            proyeccion_dias_restantes = dias_restantes
-            proyeccion_agotamiento = now + timedelta(days=dias_restantes)
+    q = lambda v: Decimal(str(v)).quantize(Decimal("0.01"))
 
     return SummaryOut(
-        saldo_actual_usd=current_balance,
-        saldo_actual_pen=saldo_actual_pen,
-        gasto_total_usd=gasto_total_usd,
-        gasto_mes_actual_usd=gasto_mes_actual_usd,
-        gasto_promedio_diario_usd=gasto_promedio_diario_usd.quantize(Decimal("0.01")),
-        dias_desde_inicio=dias_desde_inicio,
+        funds=[FundOut.model_validate(f) for f in funds],
+        total_usd=q(total_usd),
+        pen_wallet_balance=q(pen_wallet_balance),
+        gasto_mes_actual_pen=q(float(gasto_mes_pen)),
+        gasto_promedio_diario_pen=q(gasto_promedio_diario_pen),
+        ultimo_tipo_cambio=ultimo_tipo_cambio,
         proyeccion_agotamiento=proyeccion_agotamiento,
         proyeccion_dias_restantes=proyeccion_dias_restantes,
     )
