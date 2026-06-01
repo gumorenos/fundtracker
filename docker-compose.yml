@@ -29,6 +29,16 @@ services:
       - fundtracker_net
       - hermes-stack_hermes-net
 
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5173:80"
+    depends_on:
+      - backend
+    networks:
+      - fundtracker_net
+
 networks:
   fundtracker_net:
     driver: bridge
