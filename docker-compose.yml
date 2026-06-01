@@ -36,15 +36,7 @@ services:
       - backend
     networks:
       - fundtracker_net
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
-    depends_on:
-      - frontend
-    networks:
-      - fundtracker_net
+      - hermes-stack_hermes-net
 
 networks:
   fundtracker_net:
