@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fundtracker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-fundtracker}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - fundtracker_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fundtracker}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8100:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - fundtracker_net
+      - hermes-stack_hermes-net
+
+networks:
+  fundtracker_net:
+    driver: bridge
+  hermes-stack_hermes-net:
+    external: true
+
+volumes:
+  postgres_data:
