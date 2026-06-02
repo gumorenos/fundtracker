@@ -10,6 +10,7 @@ python-dotenv==1.0.1
 python-multipart==0.0.17
 pydantic[email]==2.10.3
 pydantic-settings==2.6.1
+openpyxl==3.1.5
 
 # tests
 pytest==8.3.4

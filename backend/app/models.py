@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import (
+    Boolean, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -18,13 +20,31 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
     role: Mapped[str] = mapped_column(String(16), nullable=False, default="viewer")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    read_only_mode: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    invited_by_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Invitation(Base):
+    __tablename__ = "invitations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(String(36), unique=True, nullable=False)
+    created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    used_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class Fund(Base):
     __tablename__ = "funds"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(64), nullable=False)
     initial_balance_usd: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     current_balance_usd: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
@@ -32,7 +52,6 @@ class Fund(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
-
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="fund")
 
 
@@ -40,6 +59,7 @@ class PenWallet(Base):
     __tablename__ = "pen_wallet"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     balance_pen: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=0)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
@@ -50,6 +70,7 @@ class Category(Base):
     __tablename__ = "categories"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(64), nullable=False)
     color: Mapped[str] = mapped_column(String(7), nullable=False, default="#94a3b8")
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -67,6 +88,7 @@ class Transaction(Base):
     __tablename__ = "transactions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     type: Mapped[str] = mapped_column(String(32), nullable=False, default="expense")
     amount_usd: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     amount_pen: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
@@ -78,6 +100,8 @@ class Transaction(Base):
         Integer, ForeignKey("funds.id"), nullable=True
     )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags: Mapped[list | None] = mapped_column(JSON, nullable=True)
     transaction_date: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow
     )
@@ -91,6 +115,7 @@ class ProjectionParams(Base):
     __tablename__ = "projection_params"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     adjustment_percentage: Mapped[Decimal] = mapped_column(
         Numeric(8, 2), nullable=False, default=0
     )
@@ -98,3 +123,28 @@ class ProjectionParams(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+class Alert(Base):
+    __tablename__ = "alerts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    # weekly_expense | monthly_expense | fund_balance
+    type: Mapped[str] = mapped_column(String(32), nullable=False)
+    threshold: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    period: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    last_triggered: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ExchangeRateHistory(Base):
+    __tablename__ = "exchange_rate_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    rate: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
+    date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    source: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

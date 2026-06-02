@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { format } from 'date-fns'
-import { Plus, X, ChevronLeft, ChevronRight, Search } from 'lucide-react'
+import { Plus, X, ChevronLeft, ChevronRight, Search, Download } from 'lucide-react'
 import {
   getTransactions,
   createTransaction,
@@ -10,6 +10,7 @@ import {
 } from '../api/transactions'
 import { getCategories } from '../api/categories'
 import { getFunds } from '../api/funds'
+import { exportExcel } from '../api/export'
 import { useAuth } from '../hooks/useAuth'
 import TransactionTable from '../components/TransactionTable'
 
@@ -57,9 +58,14 @@ function NewTransactionModal({ categories, funds, onClose, onSuccess }) {
   }, [amountUsd, exchangeRate, txType, setValue])
 
   const onSubmit = async (data) => {
+    const tags = data.tags_raw
+      ? data.tags_raw.split(',').map((t) => t.trim()).filter(Boolean)
+      : null
     const payload = {
       type: data.type,
       description: data.description || null,
+      notes: data.notes || null,
+      tags: tags?.length ? tags : null,
       transaction_date: data.transaction_date
         ? new Date(data.transaction_date).toISOString()
         : null,
@@ -233,10 +239,20 @@ function NewTransactionModal({ categories, funds, onClose, onSuccess }) {
             </>
           )}
 
-          {/* Shared: description + date */}
+          {/* Shared: description, notes, tags, date */}
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-1.5">Descripción</label>
             <input {...register('description')} className="field" placeholder="Opcional" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1.5">Notas</label>
+            <textarea {...register('notes')} rows={2} className="field resize-none" placeholder="Opcional" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1.5">
+              Etiquetas <span className="text-slate-500 text-xs">(separadas por coma)</span>
+            </label>
+            <input {...register('tags_raw')} className="field" placeholder="urgente, recurrente" />
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-1.5">Fecha</label>
@@ -270,15 +286,17 @@ const TYPE_LABELS = {
 }
 
 export default function Transactions() {
-  const { isAdmin } = useAuth()
+  const { isAdmin, readOnly } = useAuth()
   const queryClient = useQueryClient()
   const [showModal, setShowModal] = useState(false)
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [filterCat, setFilterCat] = useState('')
   const [filterType, setFilterType] = useState('')
+  const [filterTag, setFilterTag] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [exporting, setExporting] = useState(false)
 
   const { data: transactions = [], isLoading } = useQuery({
     queryKey: ['transactions-all'],
@@ -304,10 +322,11 @@ export default function Transactions() {
     }
     if (filterCat) list = list.filter((t) => t.category_id === parseInt(filterCat))
     if (filterType) list = list.filter((t) => t.type === filterType)
+    if (filterTag) list = list.filter((t) => t.tags?.includes(filterTag))
     if (dateFrom) list = list.filter((t) => t.transaction_date >= dateFrom)
     if (dateTo) list = list.filter((t) => t.transaction_date <= dateTo + 'T23:59:59')
     return list
-  }, [transactions, search, filterCat, filterType, dateFrom, dateTo])
+  }, [transactions, search, filterCat, filterType, filterTag, dateFrom, dateTo])
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
@@ -332,22 +351,49 @@ export default function Transactions() {
 
   const resetFilter = (setter) => (e) => { setter(e.target.value); setPage(1) }
 
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      const res = await exportExcel({ date_from: dateFrom || undefined, date_to: dateTo || undefined })
+      const url = URL.createObjectURL(res.data)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `fundtracker_${new Date().toISOString().slice(0,10)}.xlsx`
+      a.click()
+      URL.revokeObjectURL(url)
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <h1 className="text-xl font-semibold text-slate-100">Transacciones</h1>
-        <button
-          onClick={() => setShowModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          Nueva
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleExport}
+            disabled={exporting}
+            className="flex items-center gap-2 px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+          >
+            <Download className="w-4 h-4" />
+            {exporting ? 'Exportando…' : 'Excel'}
+          </button>
+          {!readOnly && (
+            <button
+              onClick={() => setShowModal(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Nueva
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Filters */}
       <div className="bg-slate-800 rounded-xl border border-slate-700 p-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
             <input
@@ -369,6 +415,12 @@ export default function Transactions() {
           </select>
           <input type="date" value={dateFrom} onChange={resetFilter(setDateFrom)} className="field" />
           <input type="date" value={dateTo} onChange={resetFilter(setDateTo)} className="field" />
+          <input
+            value={filterTag}
+            onChange={resetFilter(setFilterTag)}
+            placeholder="Etiqueta…"
+            className="field"
+          />
         </div>
       </div>
 

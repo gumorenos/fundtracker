@@ -1,56 +1,75 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
 from app.models import Fund, PenWallet, ProjectionParams, Transaction, User
-from app.schemas import FundOut, SummaryOut
+from app.schemas import FundOut, PeriodStats, SummaryOut
 
 router = APIRouter(prefix="/summary", tags=["summary"])
 
 
+def _period_stats(
+    user_id: int, start: datetime, end: datetime, db: Session
+) -> PeriodStats:
+    txs = (
+        db.query(Transaction)
+        .filter(
+            Transaction.user_id == user_id,
+            Transaction.type == "expense",
+            Transaction.transaction_date >= start,
+            Transaction.transaction_date < end,
+        )
+        .all()
+    )
+    total = Decimal(0)
+    por_cat: dict[str, Decimal] = {}
+    for tx in txs:
+        amt = Decimal(str(tx.amount_pen or 0))
+        total += amt
+        cat_name = tx.category.name if tx.category else "Sin categoría"
+        por_cat[cat_name] = por_cat.get(cat_name, Decimal(0)) + amt
+    return PeriodStats(total_pen=total, por_categoria=por_cat)
+
+
 @router.get("", response_model=SummaryOut)
 def get_summary(
+    compare: bool = Query(False),
+    period: str = Query("month"),
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     now = datetime.now(timezone.utc)
     thirty_ago = now - timedelta(days=30)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    # Funds
-    funds = db.query(Fund).order_by(Fund.id).all()
+    funds = db.query(Fund).filter(Fund.user_id == current_user.id).order_by(Fund.id).all()
     total_usd = sum(float(f.current_balance_usd) for f in funds)
 
-    # PEN wallet
-    wallet = db.query(PenWallet).first()
+    wallet = db.query(PenWallet).filter(PenWallet.user_id == current_user.id).first()
     pen_wallet_balance = float(wallet.balance_pen) if wallet else 0.0
 
-    # Monthly PEN expenses (expense type only)
-    gasto_mes_pen = db.query(
-        func.coalesce(func.sum(Transaction.amount_pen), 0)
-    ).filter(
+    gasto_mes_pen = db.query(func.coalesce(func.sum(Transaction.amount_pen), 0)).filter(
+        Transaction.user_id == current_user.id,
         Transaction.type == "expense",
         Transaction.transaction_date >= month_start,
     ).scalar()
 
-    # 30-day daily average PEN expenses
-    gasto_30_pen = db.query(
-        func.coalesce(func.sum(Transaction.amount_pen), 0)
-    ).filter(
+    gasto_30_pen = db.query(func.coalesce(func.sum(Transaction.amount_pen), 0)).filter(
+        Transaction.user_id == current_user.id,
         Transaction.type == "expense",
         Transaction.transaction_date >= thirty_ago,
     ).scalar()
     gasto_promedio_diario_pen = float(gasto_30_pen) / 30
 
-    # Last exchange rate from a currency_exchange
     last_exchange = (
         db.query(Transaction)
         .filter(
+            Transaction.user_id == current_user.id,
             Transaction.type == "currency_exchange",
             Transaction.exchange_rate.isnot(None),
         )
@@ -61,16 +80,16 @@ def get_summary(
         Decimal(str(last_exchange.exchange_rate)) if last_exchange else None
     )
 
-    # Projection: based on USD leaving via currency_exchange last 30 days
-    usd_30_exchange = db.query(
-        func.coalesce(func.sum(Transaction.amount_usd), 0)
-    ).filter(
+    usd_30_exchange = db.query(func.coalesce(func.sum(Transaction.amount_usd), 0)).filter(
+        Transaction.user_id == current_user.id,
         Transaction.type == "currency_exchange",
         Transaction.transaction_date >= thirty_ago,
     ).scalar()
     usd_per_day = float(usd_30_exchange) / 30
 
-    params = db.query(ProjectionParams).first()
+    params = db.query(ProjectionParams).filter(
+        ProjectionParams.user_id == current_user.id
+    ).first()
     adj_pct = float(params.adjustment_percentage) if params else 0.0
     usd_adjusted = usd_per_day * (1 + adj_pct / 100)
 
@@ -83,7 +102,7 @@ def get_summary(
 
     q = lambda v: Decimal(str(v)).quantize(Decimal("0.01"))
 
-    return SummaryOut(
+    result = SummaryOut(
         funds=[FundOut.model_validate(f) for f in funds],
         total_usd=q(total_usd),
         pen_wallet_balance=q(pen_wallet_balance),
@@ -93,3 +112,34 @@ def get_summary(
         proyeccion_agotamiento=proyeccion_agotamiento,
         proyeccion_dias_restantes=proyeccion_dias_restantes,
     )
+
+    # Period comparison
+    if compare:
+        if period == "week":
+            curr_start = now - timedelta(days=7)
+            prev_start = now - timedelta(days=14)
+            prev_end = curr_start
+        else:  # month
+            curr_start = month_start
+            prev_end = month_start
+            first = prev_end.replace(day=1)
+            prev_start = (first - timedelta(days=1)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        current = _period_stats(current_user.id, curr_start, now, db)
+        previous = _period_stats(current_user.id, prev_start, prev_end, db)
+
+        variacion: dict[str, float] = {}
+        all_cats = set(current.por_categoria) | set(previous.por_categoria)
+        for cat in all_cats:
+            prev_val = float(previous.por_categoria.get(cat, Decimal(0)))
+            curr_val = float(current.por_categoria.get(cat, Decimal(0)))
+            if prev_val > 0:
+                variacion[cat] = round((curr_val - prev_val) / prev_val * 100, 1)
+            else:
+                variacion[cat] = 100.0 if curr_val > 0 else 0.0
+
+        result.periodo_actual = current
+        result.periodo_anterior = previous
+        result.variacion_porcentual = variacion
+
+    return result

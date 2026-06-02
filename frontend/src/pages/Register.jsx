@@ -1,33 +1,40 @@
 import { useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { Wallet, AlertCircle } from 'lucide-react'
-import { login as apiLogin } from '../api/auth'
+import { registerWithInvite } from '../api/users'
 import { useAuth } from '../hooks/useAuth'
 
-export default function Login() {
+export default function Register() {
   const { user, login } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const inviteCode = searchParams.get('code') ?? ''
+
   const {
     register,
     handleSubmit,
+    watch,
     setError,
     formState: { errors, isSubmitting },
-  } = useForm()
+  } = useForm({ defaultValues: { invite_code: inviteCode } })
 
   useEffect(() => {
     if (user) navigate('/dashboard', { replace: true })
   }, [user, navigate])
 
-  const onSubmit = async ({ username, password }) => {
+  const onSubmit = async ({ username, password, invite_code }) => {
     try {
-      const res = await apiLogin(username, password)
+      const res = await registerWithInvite({ username, password, invite_code })
       login(res.data.access_token)
       navigate('/dashboard', { replace: true })
-    } catch {
-      setError('root', { message: 'Usuario o contraseña incorrectos' })
+    } catch (err) {
+      const detail = err.response?.data?.detail ?? 'Error al registrarse'
+      setError('root', { message: detail })
     }
   }
+
+  const password = watch('password')
 
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
@@ -38,7 +45,7 @@ export default function Login() {
           </div>
           <div className="text-center">
             <h1 className="text-3xl font-bold text-slate-100">FundTracker</h1>
-            <p className="text-slate-400 text-sm mt-1">Fondo de emergencias</p>
+            <p className="text-slate-400 text-sm mt-1">Crear cuenta</p>
           </div>
         </div>
 
@@ -47,24 +54,56 @@ export default function Login() {
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-1.5">Usuario</label>
               <input
-                {...register('username', { required: 'Requerido' })}
+                {...register('username', {
+                  required: 'Requerido',
+                  minLength: { value: 3, message: 'Mínimo 3 caracteres' },
+                })}
                 className="field"
-                placeholder="admin"
+                placeholder="mi_usuario"
                 autoComplete="username"
                 autoFocus
               />
               {errors.username && <p className="err">{errors.username.message}</p>}
             </div>
+
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-1.5">Contraseña</label>
               <input
-                {...register('password', { required: 'Requerido' })}
+                {...register('password', {
+                  required: 'Requerido',
+                  minLength: { value: 8, message: 'Mínimo 8 caracteres' },
+                })}
                 type="password"
                 className="field"
                 placeholder="••••••••"
-                autoComplete="current-password"
+                autoComplete="new-password"
               />
               {errors.password && <p className="err">{errors.password.message}</p>}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1.5">Confirmar contraseña</label>
+              <input
+                {...register('confirm_password', {
+                  required: 'Requerido',
+                  validate: (v) => v === password || 'Las contraseñas no coinciden',
+                })}
+                type="password"
+                className="field"
+                placeholder="••••••••"
+                autoComplete="new-password"
+              />
+              {errors.confirm_password && <p className="err">{errors.confirm_password.message}</p>}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1.5">Código de invitación</label>
+              <input
+                {...register('invite_code', { required: 'Requerido' })}
+                className="field font-mono text-xs"
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+              />
+              {errors.invite_code && <p className="err">{errors.invite_code.message}</p>}
             </div>
 
             {errors.root && (
@@ -79,16 +118,13 @@ export default function Login() {
               disabled={isSubmitting}
               className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium py-2.5 rounded-lg transition-colors mt-2"
             >
-              {isSubmitting ? 'Ingresando…' : 'Ingresar'}
+              {isSubmitting ? 'Registrando…' : 'Crear cuenta'}
             </button>
           </form>
 
           <div className="mt-4 text-center">
-            <Link
-              to="/register"
-              className="text-sm text-indigo-400 hover:text-indigo-300 transition-colors"
-            >
-              Tengo un código de invitación
+            <Link to="/login" className="text-sm text-slate-400 hover:text-slate-300 transition-colors">
+              Ya tengo cuenta
             </Link>
           </div>
         </div>

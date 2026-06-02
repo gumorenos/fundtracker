@@ -15,6 +15,63 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class RegisterRequest(BaseModel):
+    username: str = Field(..., min_length=3, max_length=64)
+    password: str = Field(..., min_length=8)
+    invite_code: str
+
+
+class InviteResponse(BaseModel):
+    code: str
+    invite_url: str
+    expires_at: datetime
+
+
+class ApiTokenRequest(BaseModel):
+    user_id: int
+
+
+class ApiTokenResponse(BaseModel):
+    token: str
+
+
+# ── User ──────────────────────────────────────────────────────────────────────
+
+class UserMeOut(BaseModel):
+    id: int
+    username: str
+    role: str
+    is_active: bool
+    read_only_mode: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class UserListOut(BaseModel):
+    id: int
+    username: str
+    role: str
+    is_active: bool
+    read_only_mode: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ReadOnlyModeUpdate(BaseModel):
+    enabled: bool
+
+
+class UserActiveUpdate(BaseModel):
+    is_active: bool
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(..., min_length=8)
+
+
 # ── Fund ──────────────────────────────────────────────────────────────────────
 
 class FundOut(BaseModel):
@@ -67,6 +124,8 @@ class TransactionCreate(BaseModel):
     fund_id: int | None = None
     category_id: int | None = None
     description: str | None = None
+    notes: str | None = None
+    tags: list[str] | None = None
     transaction_date: datetime | None = None
 
     @model_validator(mode="after")
@@ -109,6 +168,8 @@ class TransactionOut(BaseModel):
     fund_id: int | None
     fund: FundOut | None
     description: str | None
+    notes: str | None
+    tags: list[str] | None
     transaction_date: datetime
     created_at: datetime
 
@@ -116,6 +177,11 @@ class TransactionOut(BaseModel):
 
 
 # ── Summary ───────────────────────────────────────────────────────────────────
+
+class PeriodStats(BaseModel):
+    total_pen: Decimal
+    por_categoria: dict[str, Decimal]
+
 
 class SummaryOut(BaseModel):
     funds: list[FundOut]
@@ -126,6 +192,10 @@ class SummaryOut(BaseModel):
     ultimo_tipo_cambio: Decimal | None
     proyeccion_agotamiento: datetime | None
     proyeccion_dias_restantes: int | None
+    # Optional comparison data
+    periodo_actual: PeriodStats | None = None
+    periodo_anterior: PeriodStats | None = None
+    variacion_porcentual: dict[str, float] | None = None
 
 
 # ── Projection ────────────────────────────────────────────────────────────────
@@ -142,3 +212,48 @@ class ProjectionParamsOut(BaseModel):
 class ProjectionParamsUpdate(BaseModel):
     adjustment_percentage: Decimal = Field(..., decimal_places=2)
     notes: str | None = None
+
+
+# ── Alerts ────────────────────────────────────────────────────────────────────
+
+class AlertCreate(BaseModel):
+    type: str = Field(..., pattern="^(weekly_expense|monthly_expense|fund_balance)$")
+    threshold: Decimal = Field(..., gt=0)
+    period: str | None = None
+
+
+class AlertUpdate(BaseModel):
+    threshold: Decimal | None = Field(None, gt=0)
+    is_active: bool | None = None
+    period: str | None = None
+
+
+class AlertOut(BaseModel):
+    id: int
+    type: str
+    threshold: Decimal
+    period: str | None
+    is_active: bool
+    last_triggered: datetime | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── Exchange rate history ─────────────────────────────────────────────────────
+
+class ExchangeRateOut(BaseModel):
+    id: int
+    rate: Decimal
+    date: datetime
+    source: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ExchangeRateStatsOut(BaseModel):
+    history: list[ExchangeRateOut]
+    avg_rate: Decimal | None
+    min_rate: Decimal | None
+    max_rate: Decimal | None
