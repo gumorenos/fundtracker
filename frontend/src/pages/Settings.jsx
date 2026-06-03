@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
-import { Plus, Trash2, Save, Pencil, X, Copy, Check, Bell, BellOff } from 'lucide-react'
+import { Plus, Trash2, Save, Pencil, X, Copy, Check, Bell, BellOff, Link, LinkOff, MessageCircle } from 'lucide-react'
 import { addDays, format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { getProjectionParams, updateProjectionParams } from '../api/projection'
@@ -17,6 +17,7 @@ import {
   generateInvite, generateApiToken,
 } from '../api/users'
 import { getAlerts, createAlert, updateAlert, deleteAlert } from '../api/alerts'
+import { getMyLinks, linkPlatform, unlinkPlatform } from '../api/platforms'
 
 function Section({ title, children }) {
   return (
@@ -369,6 +370,128 @@ function ProjectionSection({ summary }) {
   )
 }
 
+// ── Messaging / Platform links ────────────────────────────────────────────────
+
+const PLATFORM_META = {
+  telegram: {
+    label: 'Telegram',
+    fieldLabel: 'Chat ID de Telegram',
+    placeholder: 'Ej: 123456789',
+    helper: '¿No sabes tu Chat ID? Escríbele al bot: /mi-id',
+  },
+  whatsapp: {
+    label: 'WhatsApp',
+    fieldLabel: 'Número de teléfono',
+    placeholder: 'Ej: 51987654321',
+    helper: 'Ingresa tu número con código de país, ej: 51987654321',
+  },
+}
+
+function PlatformCard({ platform, link, onSuccess }) {
+  const queryClient = useQueryClient()
+  const meta = PLATFORM_META[platform]
+  const [chatId, setChatId] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+
+  const handleLink = async () => {
+    if (!chatId.trim()) return
+    setSaving(true); setErr('')
+    try {
+      await linkPlatform({ platform, platform_chat_id: chatId.trim() })
+      setChatId('')
+      queryClient.invalidateQueries({ queryKey: ['my-links'] })
+      onSuccess?.()
+    } catch (e) {
+      setErr(e.response?.data?.detail ?? 'Error al vincular')
+    } finally { setSaving(false) }
+  }
+
+  const handleUnlink = async () => {
+    if (!confirm(`¿Desvincular ${meta.label}?`)) return
+    try {
+      await unlinkPlatform(platform)
+      queryClient.invalidateQueries({ queryKey: ['my-links'] })
+    } catch (e) { alert(e.response?.data?.detail ?? 'Error') }
+  }
+
+  return (
+    <div className="bg-slate-900 rounded-xl p-4 border border-slate-700/60">
+      <div className="flex items-center gap-2 mb-3">
+        <MessageCircle className="w-4 h-4 text-indigo-400 shrink-0" />
+        <span className="text-sm font-semibold text-slate-200">{meta.label}</span>
+        {link && (
+          <span className="ml-auto flex items-center gap-1 text-xs text-emerald-400 font-medium">
+            <Link className="w-3 h-3" /> Vinculado
+          </span>
+        )}
+      </div>
+
+      {link ? (
+        <div className="space-y-3">
+          <div className="bg-slate-800 rounded-lg px-3 py-2 flex items-center gap-2">
+            <code className="flex-1 text-xs text-slate-300 font-mono">{link.platform_chat_id}</code>
+            <CopyButton text={link.platform_chat_id} />
+          </div>
+          <button
+            onClick={handleUnlink}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 text-xs font-medium transition-colors"
+          >
+            <LinkOff className="w-3.5 h-3.5" /> Desvincular
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <p className="text-xs text-slate-400">
+            Vincula tu cuenta de {meta.label} para registrar gastos desde el bot.
+          </p>
+          <label className="block text-xs font-medium text-slate-400 mt-2">{meta.fieldLabel}</label>
+          <div className="flex gap-2">
+            <input
+              value={chatId}
+              onChange={(e) => { setChatId(e.target.value); setErr('') }}
+              placeholder={meta.placeholder}
+              className="field flex-1 text-sm"
+              onKeyDown={(e) => e.key === 'Enter' && handleLink()}
+            />
+            <button
+              onClick={handleLink}
+              disabled={saving || !chatId.trim()}
+              className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium transition-colors whitespace-nowrap"
+            >
+              {saving ? 'Vinculando…' : 'Vincular'}
+            </button>
+          </div>
+          <p className="text-xs text-slate-500">{meta.helper}</p>
+          {err && <p className="text-xs text-rose-400">{err}</p>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function MessagingSection() {
+  const { data: links } = useQuery({
+    queryKey: ['my-links'],
+    queryFn: () => getMyLinks().then((r) => r.data),
+  })
+
+  return (
+    <Section title="Mensajería">
+      <div className="space-y-3">
+        <p className="text-xs text-slate-400">
+          Vincula tu cuenta a un bot de mensajería para registrar gastos directamente desde Telegram o WhatsApp.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {['telegram', 'whatsapp'].map((p) => (
+            <PlatformCard key={p} platform={p} link={links?.[p]} />
+          ))}
+        </div>
+      </div>
+    </Section>
+  )
+}
+
 // ── Categories ────────────────────────────────────────────────────────────────
 
 function CategoriesSection() {
@@ -538,6 +661,7 @@ export default function Settings() {
       <MyAccountSection />
       <FundsSection />
       <ProjectionSection summary={summary} />
+      <MessagingSection />
       <CategoriesSection />
       <AlertsSection />
       {isAdmin && <UsersSection />}

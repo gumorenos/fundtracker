@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import (
-    Boolean, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text
+    Boolean, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -26,6 +26,8 @@ class User(Base):
         Integer, ForeignKey("users.id"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    platform_links: Mapped[list["PlatformLink"]] = relationship(back_populates="user")
 
 
 class Invitation(Base):
@@ -149,6 +151,21 @@ class Alert(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     last_triggered: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PlatformLink(Base):
+    """Links a user account to a messaging platform (Telegram/WhatsApp)."""
+    __tablename__ = "platform_links"
+    __table_args__ = (UniqueConstraint("platform", "platform_chat_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    platform: Mapped[str] = mapped_column(String(16), nullable=False)
+    platform_chat_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    last_token_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    user: Mapped["User"] = relationship(back_populates="platform_links")
 
 
 class ExchangeRateHistory(Base):

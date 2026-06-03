@@ -1,12 +1,12 @@
 ---
 name: fundtracker
 description: "Registra gastos y consulta el estado del fondo de emergencias via API REST."
-version: 3.0.0
+version: 4.0.0
 author: Gustavo
 license: MIT
 platforms: [linux, macos, windows]
 prerequisites:
-  env_vars: [FUNDTRACKER_API_URL, FUNDTRACKER_TOKEN]
+  env_vars: [FUNDTRACKER_API_URL]
   commands: [curl, jq]
 metadata:
   hermes:
@@ -21,7 +21,6 @@ Responde siempre en español. Sé conciso y amigable.
 
 ```bash
 FUNDTRACKER_API_URL=http://backend:8000  # URL interna del backend
-FUNDTRACKER_TOKEN=<JWT del usuario>       # Token de autenticación
 ```
 
 ## Cuándo usar este skill
@@ -32,13 +31,63 @@ Usar este skill cuando el usuario:
 - Consulte su saldo ("cuánto tengo", "cuánto me queda")
 - Consulte sus gastos ("cuánto gasté", "cómo van mis gastos")
 - Pregunte proyecciones ("cuánto me dura", "hasta cuándo me alcanza")
+- Escriba "/mi-id" o pida su chat ID
+
+---
+
+## PASO 0 — Identificación de usuario (OBLIGATORIO antes de cualquier acción)
+
+Al recibir CUALQUIER mensaje, lo primero es identificar quién escribe y obtener su token personal.
+
+### 1. Determinar plataforma y chat_id
+
+- Si el mensaje viene de Telegram: `platform = "telegram"`, obtener el `chat_id` del mensaje entrante.
+- Si el mensaje viene de WhatsApp: `platform = "whatsapp"`, obtener el número de teléfono del remitente.
+
+### 2. Obtener token del usuario
+
+```bash
+USER_TOKEN=$(curl -s -X POST "${FUNDTRACKER_API_URL}/auth/platform-token" \
+  -H "Content-Type: application/json" \
+  -d "{\"platform\": \"telegram\", \"platform_chat_id\": \"<CHAT_ID>\"}" \
+  | jq -r '.token')
+```
+
+Reemplazar `telegram` y `<CHAT_ID>` según la plataforma y el remitente real.
+
+### 3. Si la respuesta es 404
+
+Responder al usuario:
+> "No tienes una cuenta vinculada en FundTracker.
+> Ve a la app y en **Settings → Mensajería** vincula tu cuenta de Telegram.
+> Necesitarás tu Chat ID: es `<CHAT_ID>`."
+
+**No intentar registrar nada. Detener aquí.**
+
+### 4. Si la respuesta contiene token
+
+Usar `USER_TOKEN` para TODOS los requests siguientes. **No usar ningún token global.**
+
+---
+
+## Comando /mi-id
+
+Si el usuario escribe "/mi-id", "cuál es mi id", "dame mi chat id" o similar:
+
+Responder:
+> "Tu Chat ID de Telegram es: `<CHAT_ID_DEL_MENSAJE>`
+> Cópialo y pégalo en FundTracker → Settings → Mensajería para vincular tu cuenta."
+
+No llamar a ningún endpoint. Solo reportar el chat_id del mensaje entrante.
+
+---
 
 ## Autenticación
 
-Incluir en todos los requests:
+Incluir en todos los requests (usar `USER_TOKEN` obtenido en el Paso 0):
 
 ```bash
--H "Authorization: Bearer ${FUNDTRACKER_TOKEN}"
+-H "Authorization: Bearer ${USER_TOKEN}"
 -H "Content-Type: application/json"
 ```
 
@@ -53,7 +102,7 @@ Consultar fondos disponibles antes de registrar un cambio o gasto en USD:
 
 ```bash
 curl -s "${FUNDTRACKER_API_URL}/funds" \
-  -H "Authorization: Bearer ${FUNDTRACKER_TOKEN}" | \
+  -H "Authorization: Bearer ${USER_TOKEN}" | \
   jq '.[] | {id, name, balance_usd, balance_pen}'
 ```
 
@@ -65,7 +114,7 @@ fund_id es OPCIONAL. Si el usuario no especifica fondo, omitirlo (gasto "sin asi
 
 ```bash
 curl -s -X POST "${FUNDTRACKER_API_URL}/transactions" \
-  -H "Authorization: Bearer ${FUNDTRACKER_TOKEN}" \
+  -H "Authorization: Bearer ${USER_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
     "type": "expense",
@@ -82,7 +131,7 @@ Consultar categorías actuales:
 
 ```bash
 curl -s "${FUNDTRACKER_API_URL}/categories" \
-  -H "Authorization: Bearer ${FUNDTRACKER_TOKEN}" | jq '.[] | {id, name}'
+  -H "Authorization: Bearer ${USER_TOKEN}" | jq '.[] | {id, name}'
 ```
 
 Categorías por defecto:
@@ -110,7 +159,7 @@ El cambio descuenta USD del fondo y SUMA PEN al mismo fondo.
 
 ```bash
 curl -s -X POST "${FUNDTRACKER_API_URL}/transactions" \
-  -H "Authorization: Bearer ${FUNDTRACKER_TOKEN}" \
+  -H "Authorization: Bearer ${USER_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
     "type": "currency_exchange",
@@ -133,7 +182,7 @@ Cuando el usuario dice: "pagué 20 dólares", "gasté USD 50", etc.
 
 ```bash
 curl -s -X POST "${FUNDTRACKER_API_URL}/transactions" \
-  -H "Authorization: Bearer ${FUNDTRACKER_TOKEN}" \
+  -H "Authorization: Bearer ${USER_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
     "type": "usd_expense",
@@ -151,7 +200,7 @@ Cuando el usuario pregunta cuánto tiene o cómo van sus gastos:
 
 ```bash
 curl -s "${FUNDTRACKER_API_URL}/summary" \
-  -H "Authorization: Bearer ${FUNDTRACKER_TOKEN}" | jq '.'
+  -H "Authorization: Bearer ${USER_TOKEN}" | jq '.'
 ```
 
 Presentar la respuesta así (iterar sobre `.funds[]`):
@@ -169,18 +218,20 @@ Presentar la respuesta así (iterar sobre `.funds[]`):
 ```bash
 # Gastos del mes actual
 curl -s "${FUNDTRACKER_API_URL}/transactions?date_from=2024-01-01&date_to=2024-01-31&limit=50" \
-  -H "Authorization: Bearer ${FUNDTRACKER_TOKEN}" | \
+  -H "Authorization: Bearer ${USER_TOKEN}" | \
   jq '[.[] | {fecha: .transaction_date, desc: .description, pen: .amount_pen}]'
 
 # Gastos de una categoría específica
 curl -s "${FUNDTRACKER_API_URL}/transactions?category_id=1&limit=20" \
-  -H "Authorization: Bearer ${FUNDTRACKER_TOKEN}" | \
+  -H "Authorization: Bearer ${USER_TOKEN}" | \
   jq '[.[] | {fecha: .transaction_date, desc: .description, pen: .amount_pen}]'
 ```
 
 ## Manejo de errores
 
-Si la API devuelve error 401: el token expiró, informar al usuario que necesita renovar acceso.
+Si la API devuelve error 401: el token expiró o es inválido. Repetir el Paso 0 para obtener uno nuevo.
+Si la API devuelve error 404 en platform-token: cuenta no vinculada (ver Paso 0, punto 3).
+Si la API devuelve error 429: rate limit alcanzado. Esperar un minuto antes de reintentar.
 Si la API devuelve error 422: datos inválidos, revisar los campos enviados.
 Si la API no responde: informar que el servicio no está disponible momentáneamente.
 

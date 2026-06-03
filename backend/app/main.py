@@ -9,6 +9,7 @@ from app.routers import (
     exchange_rates,
     export,
     funds,
+    platform_links,
     projection,
     summary,
     transactions,
@@ -26,6 +27,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(platform_links.router)
 app.include_router(users.router)
 app.include_router(transactions.router)
 app.include_router(categories.router)

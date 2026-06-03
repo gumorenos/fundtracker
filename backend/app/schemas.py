@@ -272,6 +272,44 @@ class AlertOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Platform links ────────────────────────────────────────────────────────────
+
+class PlatformLinkCreate(BaseModel):
+    platform: str = Field(..., pattern="^(telegram|whatsapp)$")
+    platform_chat_id: str = Field(..., min_length=1, max_length=128)
+
+
+class PlatformLinkOut(BaseModel):
+    platform: str
+    platform_chat_id: str
+    linked_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class MyLinksOut(BaseModel):
+    telegram: PlatformLinkOut | None
+    whatsapp: PlatformLinkOut | None
+
+
+class PlatformTokenRequest(BaseModel):
+    platform: str = Field(..., pattern="^(telegram|whatsapp)$")
+    platform_chat_id: str = Field(..., min_length=1, max_length=128)
+
+
+class PlatformTokenResponse(BaseModel):
+    token: str
+
+
+class AdminPlatformLinkOut(BaseModel):
+    id: int
+    user_id: int
+    username: str
+    platform: str
+    platform_chat_id: str
+    last_token_at: datetime | None
+    created_at: datetime
+
+
 # ── Exchange rate history ─────────────────────────────────────────────────────
 
 class ExchangeRateOut(BaseModel):
