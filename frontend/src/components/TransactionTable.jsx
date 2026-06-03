@@ -1,6 +1,6 @@
 import { format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { Trash2 } from 'lucide-react'
+import { Trash2, Pencil } from 'lucide-react'
 
 const TYPE_CONFIG = {
   expense: { label: 'Gasto', cls: 'bg-rose-500/15 text-rose-300' },
@@ -13,7 +13,18 @@ const fmtUSD = (v) => (v != null ? `$${parseFloat(v).toFixed(2)}` : '—')
 const fmtPEN = (v) => (v != null ? `S/ ${parseFloat(v).toFixed(2)}` : '—')
 const fmtTC = (v) => (v != null ? parseFloat(v).toFixed(4) : '—')
 
-export default function TransactionTable({ transactions, onDelete }) {
+export default function TransactionTable({
+  transactions,
+  onDelete,
+  onEdit,
+  selectedIds,
+  onToggleSelect,
+  onToggleAll,
+}) {
+  const hasSelection = selectedIds && selectedIds.size > 0
+  const allSelected = transactions?.length > 0 && transactions?.every((t) => selectedIds?.has(t.id))
+  const showCheckboxes = !!onToggleSelect
+
   if (!transactions?.length) {
     return (
       <div className="text-center py-12 text-slate-500 text-sm">
@@ -27,11 +38,17 @@ export default function TransactionTable({ transactions, onDelete }) {
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-slate-700">
-            {[
-              'Fecha', 'Tipo', 'Descripción', 'Categoría',
-              'Fondo', 'USD', 'PEN', 'TC',
-              ...(onDelete ? [''] : []),
-            ].map((h) => (
+            {showCheckboxes && (
+              <th className="px-3 py-3 w-8">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={() => onToggleAll(transactions)}
+                  className="rounded border-slate-600 bg-slate-900 text-indigo-600 cursor-pointer"
+                />
+              </th>
+            )}
+            {['Fecha', 'Tipo', 'Descripción', 'Categoría', 'Fondo', 'USD', 'PEN', 'TC', ...(onEdit || onDelete ? [''] : [])].map((h) => (
               <th
                 key={h}
                 className="px-3 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap"
@@ -44,8 +61,22 @@ export default function TransactionTable({ transactions, onDelete }) {
         <tbody className="divide-y divide-slate-700/50">
           {transactions.map((tx) => {
             const typeCfg = TYPE_CONFIG[tx.type] ?? { label: tx.type, cls: 'bg-slate-700 text-slate-300' }
+            const isSelected = selectedIds?.has(tx.id)
             return (
-              <tr key={tx.id} className="hover:bg-slate-700/30 transition-colors">
+              <tr
+                key={tx.id}
+                className={`transition-colors ${isSelected ? 'bg-indigo-600/10' : 'hover:bg-slate-700/30'}`}
+              >
+                {showCheckboxes && (
+                  <td className="px-3 py-3">
+                    <input
+                      type="checkbox"
+                      checked={isSelected ?? false}
+                      onChange={() => onToggleSelect(tx.id)}
+                      className="rounded border-slate-600 bg-slate-900 text-indigo-600 cursor-pointer"
+                    />
+                  </td>
+                )}
                 <td className="px-3 py-3 text-slate-400 whitespace-nowrap">
                   {fmtDate(tx.transaction_date)}
                 </td>
@@ -70,7 +101,7 @@ export default function TransactionTable({ transactions, onDelete }) {
                   )}
                 </td>
                 <td className="px-3 py-3 text-slate-400 whitespace-nowrap">
-                  {tx.fund?.name ?? '—'}
+                  {tx.fund?.name ?? <span className="text-slate-600 italic">Sin asignar</span>}
                 </td>
                 <td className="px-3 py-3 text-slate-200 font-medium tabular-nums whitespace-nowrap">
                   {fmtUSD(tx.amount_usd)}
@@ -81,14 +112,28 @@ export default function TransactionTable({ transactions, onDelete }) {
                 <td className="px-3 py-3 text-slate-500 tabular-nums">
                   {fmtTC(tx.exchange_rate)}
                 </td>
-                {onDelete && (
+                {(onEdit || onDelete) && (
                   <td className="px-3 py-3">
-                    <button
-                      onClick={() => onDelete(tx.id)}
-                      className="p-1.5 rounded-md text-slate-500 hover:text-rose-400 hover:bg-rose-400/10 transition-colors"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      {onEdit && (
+                        <button
+                          onClick={() => onEdit(tx)}
+                          className="p-1.5 rounded-md text-slate-500 hover:text-indigo-400 hover:bg-indigo-400/10 transition-colors"
+                          title="Editar"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      {onDelete && (
+                        <button
+                          onClick={() => onDelete(tx.id)}
+                          className="p-1.5 rounded-md text-slate-500 hover:text-rose-400 hover:bg-rose-400/10 transition-colors"
+                          title="Eliminar"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </td>
                 )}
               </tr>

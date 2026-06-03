@@ -14,8 +14,10 @@ def get_projection_params(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Returns the global projection params (fund_id = null)."""
     params = db.query(ProjectionParams).filter(
-        ProjectionParams.user_id == current_user.id
+        ProjectionParams.user_id == current_user.id,
+        ProjectionParams.fund_id.is_(None),
     ).first()
     if not params:
         raise HTTPException(status_code=404, detail="Projection params not found")
@@ -29,12 +31,17 @@ def update_projection_params(
     current_user: User = Depends(require_write_access),
 ):
     params = db.query(ProjectionParams).filter(
-        ProjectionParams.user_id == current_user.id
+        ProjectionParams.user_id == current_user.id,
+        ProjectionParams.fund_id.is_(None),
     ).first()
     if not params:
         raise HTTPException(status_code=404, detail="Projection params not found")
-    params.adjustment_percentage = body.adjustment_percentage
-    params.notes = body.notes
+    if body.adjustment_percentage is not None:
+        params.adjustment_percentage = body.adjustment_percentage
+    if body.adjustment_amount_pen is not None:
+        params.adjustment_amount_pen = body.adjustment_amount_pen
+    if body.notes is not None:
+        params.notes = body.notes
     db.commit()
     db.refresh(params)
     return params

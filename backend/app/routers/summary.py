@@ -7,15 +7,14 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import Fund, PenWallet, ProjectionParams, Transaction, User
+from app.models import Fund, ProjectionParams, Transaction, User
 from app.schemas import FundOut, PeriodStats, SummaryOut
+from app.routers.funds import _compute_fund_projection
 
 router = APIRouter(prefix="/summary", tags=["summary"])
 
 
-def _period_stats(
-    user_id: int, start: datetime, end: datetime, db: Session
-) -> PeriodStats:
+def _period_stats(user_id: int, start: datetime, end: datetime, db: Session) -> PeriodStats:
     txs = (
         db.query(Transaction)
         .filter(
@@ -48,10 +47,22 @@ def get_summary(
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     funds = db.query(Fund).filter(Fund.user_id == current_user.id).order_by(Fund.id).all()
-    total_usd = sum(float(f.current_balance_usd) for f in funds)
+    total_usd = sum(float(f.balance_usd) for f in funds)
+    total_pen = sum(float(f.balance_pen) for f in funds)
 
-    wallet = db.query(PenWallet).filter(PenWallet.user_id == current_user.id).first()
-    pen_wallet_balance = float(wallet.balance_pen) if wallet else 0.0
+    # Build FundOut with per-fund projection data
+    funds_out = []
+    for f in funds:
+        pp = db.query(ProjectionParams).filter(
+            ProjectionParams.user_id == current_user.id,
+            ProjectionParams.fund_id == f.id,
+        ).first()
+        proj = _compute_fund_projection(f, pp, current_user.id, db)
+        fund_out = FundOut.model_validate(f).model_copy(update={
+            "projected_exhaustion_date": proj.projected_exhaustion_date,
+            "projected_days_remaining": proj.projected_days_remaining,
+        })
+        funds_out.append(fund_out)
 
     gasto_mes_pen = db.query(func.coalesce(func.sum(Transaction.amount_pen), 0)).filter(
         Transaction.user_id == current_user.id,
@@ -76,21 +87,22 @@ def get_summary(
         .order_by(Transaction.transaction_date.desc())
         .first()
     )
-    ultimo_tipo_cambio = (
-        Decimal(str(last_exchange.exchange_rate)) if last_exchange else None
-    )
+    ultimo_tipo_cambio = Decimal(str(last_exchange.exchange_rate)) if last_exchange else None
+
+    # Global projection (fund_id = null)
+    global_params = db.query(ProjectionParams).filter(
+        ProjectionParams.user_id == current_user.id,
+        ProjectionParams.fund_id.is_(None),
+    ).first()
 
     usd_30_exchange = db.query(func.coalesce(func.sum(Transaction.amount_usd), 0)).filter(
         Transaction.user_id == current_user.id,
-        Transaction.type == "currency_exchange",
+        Transaction.type.in_(["currency_exchange", "usd_expense"]),
         Transaction.transaction_date >= thirty_ago,
     ).scalar()
     usd_per_day = float(usd_30_exchange) / 30
 
-    params = db.query(ProjectionParams).filter(
-        ProjectionParams.user_id == current_user.id
-    ).first()
-    adj_pct = float(params.adjustment_percentage) if params else 0.0
+    adj_pct = float(global_params.adjustment_percentage) if global_params else 0.0
     usd_adjusted = usd_per_day * (1 + adj_pct / 100)
 
     proyeccion_agotamiento = None
@@ -103,9 +115,9 @@ def get_summary(
     q = lambda v: Decimal(str(v)).quantize(Decimal("0.01"))
 
     result = SummaryOut(
-        funds=[FundOut.model_validate(f) for f in funds],
+        funds=funds_out,
         total_usd=q(total_usd),
-        pen_wallet_balance=q(pen_wallet_balance),
+        total_pen=q(total_pen),
         gasto_mes_actual_pen=q(float(gasto_mes_pen)),
         gasto_promedio_diario_pen=q(gasto_promedio_diario_pen),
         ultimo_tipo_cambio=ultimo_tipo_cambio,
@@ -113,13 +125,12 @@ def get_summary(
         proyeccion_dias_restantes=proyeccion_dias_restantes,
     )
 
-    # Period comparison
     if compare:
         if period == "week":
             curr_start = now - timedelta(days=7)
             prev_start = now - timedelta(days=14)
             prev_end = curr_start
-        else:  # month
+        else:
             curr_start = month_start
             prev_end = month_start
             first = prev_end.replace(day=1)
@@ -129,14 +140,10 @@ def get_summary(
         previous = _period_stats(current_user.id, prev_start, prev_end, db)
 
         variacion: dict[str, float] = {}
-        all_cats = set(current.por_categoria) | set(previous.por_categoria)
-        for cat in all_cats:
+        for cat in set(current.por_categoria) | set(previous.por_categoria):
             prev_val = float(previous.por_categoria.get(cat, Decimal(0)))
             curr_val = float(current.por_categoria.get(cat, Decimal(0)))
-            if prev_val > 0:
-                variacion[cat] = round((curr_val - prev_val) / prev_val * 100, 1)
-            else:
-                variacion[cat] = 100.0 if curr_val > 0 else 0.0
+            variacion[cat] = round((curr_val - prev_val) / prev_val * 100, 1) if prev_val > 0 else (100.0 if curr_val > 0 else 0.0)
 
         result.periodo_actual = current
         result.periodo_anterior = previous

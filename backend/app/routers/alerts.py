@@ -25,7 +25,6 @@ def check_alerts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Evaluate all active alerts and return the ones currently triggered."""
     now = datetime.now(timezone.utc)
     triggered = []
 
@@ -53,7 +52,7 @@ def check_alerts(
 
         elif alert.type == "fund_balance":
             for fund in db.query(Fund).filter(Fund.user_id == current_user.id).all():
-                if float(fund.current_balance_usd) < float(alert.threshold):
+                if float(fund.balance_usd) < float(alert.threshold):
                     is_triggered = True
                     break
 
@@ -71,12 +70,7 @@ def create_alert(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_write_access),
 ):
-    alert = Alert(
-        user_id=current_user.id,
-        type=body.type,
-        threshold=body.threshold,
-        period=body.period,
-    )
+    alert = Alert(user_id=current_user.id, type=body.type, threshold=body.threshold, period=body.period)
     db.add(alert)
     db.commit()
     db.refresh(alert)
@@ -90,9 +84,7 @@ def update_alert(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_write_access),
 ):
-    alert = db.query(Alert).filter(
-        Alert.id == alert_id, Alert.user_id == current_user.id
-    ).first()
+    alert = db.query(Alert).filter(Alert.id == alert_id, Alert.user_id == current_user.id).first()
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
     if body.threshold is not None:
@@ -112,9 +104,7 @@ def delete_alert(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_write_access),
 ):
-    alert = db.query(Alert).filter(
-        Alert.id == alert_id, Alert.user_id == current_user.id
-    ).first()
+    alert = db.query(Alert).filter(Alert.id == alert_id, Alert.user_id == current_user.id).first()
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
     db.delete(alert)

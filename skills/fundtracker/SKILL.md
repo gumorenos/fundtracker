@@ -1,7 +1,7 @@
 ---
 name: fundtracker
 description: "Registra gastos y consulta el estado del fondo de emergencias via API REST."
-version: 1.0.0
+version: 3.0.0
 author: Gustavo
 license: MIT
 platforms: [linux, macos, windows]
@@ -42,9 +42,26 @@ Incluir en todos los requests:
 -H "Content-Type: application/json"
 ```
 
+## Estructura de fondos
+
+Cada usuario tiene fondos independientes. Cada fondo tiene:
+- `balance_usd`: saldo en dólares
+- `balance_pen`: saldo en soles (del mismo fondo)
+- `currency_mode`: 'usd_only' | 'pen_only' | 'both'
+
+Consultar fondos disponibles antes de registrar un cambio o gasto en USD:
+
+```bash
+curl -s "${FUNDTRACKER_API_URL}/funds" \
+  -H "Authorization: Bearer ${FUNDTRACKER_TOKEN}" | \
+  jq '.[] | {id, name, balance_usd, balance_pen}'
+```
+
 ## 1. Registrar gasto normal en soles
 
 Cuando el usuario dice: "gasté 45 soles en taxi", "pagué 80 en comida", etc.
+
+fund_id es OPCIONAL. Si el usuario no especifica fondo, omitirlo (gasto "sin asignar").
 
 ```bash
 curl -s -X POST "${FUNDTRACKER_API_URL}/transactions" \
@@ -54,9 +71,10 @@ curl -s -X POST "${FUNDTRACKER_API_URL}/transactions" \
     "type": "expense",
     "amount_pen": 45.00,
     "category_id": 1,
+    "fund_id": 1,
     "description": "Taxi",
     "transaction_date": "2024-01-15"
-  }' | jq '{mensaje: "Gasto registrado", monto: .amount_pen, categoria: .category_id}'
+  }' | jq '{mensaje: "Gasto registrado", monto: .amount_pen, fondo: .fund_id}'
 ```
 
 ### Categorías disponibles
@@ -83,11 +101,12 @@ Si el usuario no especifica categoría, inferir del contexto:
 - luz, agua, internet, teléfono → Servicios (5)
 - cualquier otro → Otros (6)
 
-Si no está seguro, preguntar al usuario antes de registrar.
+Si no está seguro de la categoría, preguntar antes de registrar.
 
 ## 2. Registrar cambio de moneda
 
 Cuando el usuario dice: "cambié 100 dólares", "cambié 50 USD del fondo personal", etc.
+El cambio descuenta USD del fondo y SUMA PEN al mismo fondo.
 
 ```bash
 curl -s -X POST "${FUNDTRACKER_API_URL}/transactions" \
@@ -104,11 +123,7 @@ curl -s -X POST "${FUNDTRACKER_API_URL}/transactions" \
   }' | jq '{mensaje: "Cambio registrado", usd: .amount_usd, pen: .amount_pen, tc: .exchange_rate}'
 ```
 
-Fondos disponibles:
-- fund_id 1: Fondo Emergencia
-- fund_id 2: Fondo Personal
-
-Si el usuario no especifica fondo, preguntar: "¿Lo sacaste del fondo de emergencia o del personal?"
+Si el usuario no especifica fondo, preguntar: "¿De qué fondo sacaste los dólares?"
 Si no menciona tipo de cambio, preguntar: "¿A qué tipo de cambio lo cambiaste?"
 Si no menciona monto en soles, calcular: amount_pen = amount_usd * exchange_rate
 
@@ -139,14 +154,15 @@ curl -s "${FUNDTRACKER_API_URL}/summary" \
   -H "Authorization: Bearer ${FUNDTRACKER_TOKEN}" | jq '.'
 ```
 
-Presentar la respuesta así:
-💰 Fondos USD:
-• Emergencia: $X,XXX.XX
-• Personal: $X,XXX.XX
-• Total: $X,XXX.XX
-💵 Saldo en soles: S/ X,XXX.XX
-📊 Este mes: S/ XXX.XX gastados
-📈 Proyección: el fondo dura hasta [fecha] ([N] días)
+Presentar la respuesta así (iterar sobre `.funds[]`):
+💰 Fondos:
+• [name]: $[balance_usd] USD · S/ [balance_pen] — se agota ~[projected_exhaustion_date] ([projected_days_remaining]d)
+  (si `projected_days_remaining` es null: "sin proyección")
+• Sin asignar: S/ [total gastos expense sin fund_id] (si aplica)
+📊 Total USD: $[total_usd]  |  Total PEN: S/ [total_pen]
+📊 Este mes: S/ [gasto_mes_actual_pen] gastados en soles
+📈 Proyección global: hasta [proyeccion_agotamiento] ([proyeccion_dias_restantes] días)
+   (si null: "sin datos suficientes")
 
 ## 5. Consultar gastos por categoría o período
 

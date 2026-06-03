@@ -44,7 +44,6 @@ class UserMeOut(BaseModel):
     is_active: bool
     read_only_mode: bool
     created_at: datetime
-
     model_config = {"from_attributes": True}
 
 
@@ -55,7 +54,6 @@ class UserListOut(BaseModel):
     is_active: bool
     read_only_mode: bool
     created_at: datetime
-
     model_config = {"from_attributes": True}
 
 
@@ -77,14 +75,63 @@ class PasswordChangeRequest(BaseModel):
 class FundOut(BaseModel):
     id: int
     name: str
+    balance_usd: Decimal
+    balance_pen: Decimal
     initial_balance_usd: Decimal
-    current_balance_usd: Decimal
-
+    initial_balance_pen: Decimal
+    currency_mode: str
+    # Optional: populated in summary endpoint
+    projected_exhaustion_date: datetime | None = None
+    projected_days_remaining: int | None = None
     model_config = {"from_attributes": True}
 
 
-class FundInitialBalanceUpdate(BaseModel):
-    initial_balance_usd: Decimal = Field(..., gt=0, decimal_places=2)
+class FundCreate(BaseModel):
+    name: str
+    initial_balance_usd: Decimal = Field(default=0, ge=0)
+    initial_balance_pen: Decimal = Field(default=0, ge=0)
+    currency_mode: str = "both"
+
+
+class FundUpdate(BaseModel):
+    name: str | None = None
+    currency_mode: str | None = None
+
+
+class FundBalancesUpdate(BaseModel):
+    initial_balance_usd: Decimal = Field(..., ge=0)
+    initial_balance_pen: Decimal = Field(..., ge=0)
+
+
+# ── Projection ────────────────────────────────────────────────────────────────
+
+class ProjectionParamsOut(BaseModel):
+    id: int
+    fund_id: int | None
+    adjustment_percentage: Decimal
+    adjustment_amount_pen: Decimal | None
+    notes: str | None
+    updated_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class ProjectionParamsUpdate(BaseModel):
+    adjustment_percentage: Decimal | None = None
+    adjustment_amount_pen: Decimal | None = None
+    notes: str | None = None
+
+
+class FundProjectionOut(BaseModel):
+    fund_id: int | None
+    fund_name: str
+    balance_usd: Decimal
+    daily_usd_rate: Decimal
+    adjustment_percentage: Decimal
+    adjustment_amount_pen: Decimal | None
+    notes: str | None
+    projected_exhaustion_date: datetime | None
+    projected_days_remaining: int | None
+    has_sufficient_data: bool
 
 
 # ── Category ──────────────────────────────────────────────────────────────────
@@ -107,7 +154,6 @@ class CategoryOut(CategoryBase):
     id: int
     is_default: bool
     created_at: datetime
-
     model_config = {"from_attributes": True}
 
 
@@ -121,7 +167,7 @@ class TransactionCreate(BaseModel):
     amount_usd: Decimal | None = Field(None, gt=0)
     amount_pen: Decimal | None = Field(None, gt=0)
     exchange_rate: Decimal | None = Field(None, gt=0)
-    fund_id: int | None = None
+    fund_id: int | None = None        # null = "sin asignar" for expense
     category_id: int | None = None
     description: str | None = None
     notes: str | None = None
@@ -138,6 +184,7 @@ class TransactionCreate(BaseModel):
                 raise ValueError("amount_pen required for expense")
             if self.category_id is None:
                 raise ValueError("category_id required for expense")
+            # fund_id is optional for expense (null = unassigned)
         elif t == "currency_exchange":
             for name, val in [
                 ("amount_usd", self.amount_usd),
@@ -172,8 +219,11 @@ class TransactionOut(BaseModel):
     tags: list[str] | None
     transaction_date: datetime
     created_at: datetime
-
     model_config = {"from_attributes": True}
+
+
+class BulkDeleteRequest(BaseModel):
+    ids: list[int] = Field(..., min_length=1)
 
 
 # ── Summary ───────────────────────────────────────────────────────────────────
@@ -186,32 +236,15 @@ class PeriodStats(BaseModel):
 class SummaryOut(BaseModel):
     funds: list[FundOut]
     total_usd: Decimal
-    pen_wallet_balance: Decimal
+    total_pen: Decimal
     gasto_mes_actual_pen: Decimal
     gasto_promedio_diario_pen: Decimal
     ultimo_tipo_cambio: Decimal | None
     proyeccion_agotamiento: datetime | None
     proyeccion_dias_restantes: int | None
-    # Optional comparison data
     periodo_actual: PeriodStats | None = None
     periodo_anterior: PeriodStats | None = None
     variacion_porcentual: dict[str, float] | None = None
-
-
-# ── Projection ────────────────────────────────────────────────────────────────
-
-class ProjectionParamsOut(BaseModel):
-    id: int
-    adjustment_percentage: Decimal
-    notes: str | None
-    updated_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
-class ProjectionParamsUpdate(BaseModel):
-    adjustment_percentage: Decimal = Field(..., decimal_places=2)
-    notes: str | None = None
 
 
 # ── Alerts ────────────────────────────────────────────────────────────────────
@@ -236,7 +269,6 @@ class AlertOut(BaseModel):
     is_active: bool
     last_triggered: datetime | None
     created_at: datetime
-
     model_config = {"from_attributes": True}
 
 
@@ -248,7 +280,6 @@ class ExchangeRateOut(BaseModel):
     date: datetime
     source: str | None
     created_at: datetime
-
     model_config = {"from_attributes": True}
 
 
