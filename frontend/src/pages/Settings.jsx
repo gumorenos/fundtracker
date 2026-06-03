@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
-import { Plus, Trash2, Save, Pencil, X, Copy, Check, Bell, BellOff, Link, LinkOff, MessageCircle } from 'lucide-react'
+import { Plus, Trash2, Save, Pencil, X, Copy, Check, Bell, BellOff, Link, Unlink, MessageCircle } from 'lucide-react'
 import { addDays, format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { getProjectionParams, updateProjectionParams } from '../api/projection'
@@ -437,7 +437,7 @@ function PlatformCard({ platform, link, onSuccess }) {
             onClick={handleUnlink}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 text-xs font-medium transition-colors"
           >
-            <LinkOff className="w-3.5 h-3.5" /> Desvincular
+            <Unlink className="w-3.5 h-3.5" /> Desvincular
           </button>
         </div>
       ) : (
